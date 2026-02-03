@@ -1,0 +1,238 @@
+# Claude Astro Brain Rider - mise configuration
+#
+# This file works on BOTH Mac (dev machine) and Raspberry Pi!
+# - On Mac: Use deploy, ssh, and pi:* tasks
+# - On Pi: Use systemd to manage the service (sudo systemctl start/stop/restart brain-rider)
+
+# Python 3.11 is required for tflite-runtime (openwakeword dependency)
+[tools]
+python = "3.11"
+
+[env]
+PI_HOST = "cowboy-claude.local"
+PI_USER = "cowboy"
+PI_PROJECT_DIR = "/home/cowboy/claude-astro-brain-rider"
+
+
+# ============================================================================
+# Pi-Local Service Management (run these ON the Raspberry Pi directly)
+# ============================================================================
+# 
+# The brain-rider service is managed by systemd. Use these commands directly:
+#
+#   sudo systemctl start brain-rider      # Start the service
+#   sudo systemctl stop brain-rider       # Stop the service
+#   sudo systemctl restart brain-rider    # Restart the service
+#   sudo systemctl status brain-rider     # Check service status
+#   sudo journalctl -u brain-rider -f     # View live logs
+#   sudo journalctl -u brain-rider -n 50  # View last 50 log lines
+#
+# ============================================================================
+
+# ============================================================================
+# Setup Tasks (run during initial setup)
+# ============================================================================
+
+[tasks."models:download"]
+description = "Download Piper TTS voice models (run on Pi)"
+run = '''#!/usr/bin/env bash
+cd ~/claude-astro-brain-rider
+./scripts/download_piper_models.sh
+'''
+
+# ============================================================================
+# Mac Remote Tasks (control Pi service from Mac via SSH)
+# ============================================================================
+
+[tasks."pi:start"]
+description = "Start brain-rider service on Pi (from Mac)"
+run = 'ssh "$PI_USER@$PI_HOST" "sudo systemctl start brain-rider && echo \"✅ Service started\""'
+
+[tasks."pi:stop"]
+description = "Stop brain-rider service on Pi (from Mac)"
+run = 'ssh "$PI_USER@$PI_HOST" "sudo systemctl stop brain-rider && echo \"✅ Service stopped\""'
+
+[tasks."pi:restart"]
+alias = "pr"
+description = "Restart brain-rider service on Pi (from Mac)"
+run = 'ssh "$PI_USER@$PI_HOST" "sudo systemctl restart brain-rider && sleep 2 && sudo systemctl status brain-rider --no-pager"'
+
+[tasks."pi:status"]
+alias = "ps"
+description = "Check brain-rider service status on Pi (from Mac)"
+run = 'ssh "$PI_USER@$PI_HOST" "sudo systemctl status brain-rider --no-pager"'
+
+[tasks."pi:logs"]
+alias = "pl"
+description = "Tail logs from Pi (from Mac)"
+run = 'ssh "$PI_USER@$PI_HOST" "sudo journalctl -u brain-rider -f"'
+
+[tasks."pi:logs:recent"]
+alias = "plr"
+description = "Show recent logs from Pi (from Mac)"
+run = 'ssh "$PI_USER@$PI_HOST" "sudo journalctl -u brain-rider -n 50 --no-pager"'
+
+# ============================================================================
+# Deployment Tasks (Mac only)
+# ============================================================================
+
+[tasks.deploy]
+description = "Deploy source files to Raspberry Pi"
+run = './scripts/deploy.sh'
+
+[tasks."deploy:full"]
+alias = "df"
+description = "Deploy all files (src, config, scripts, systemd)"
+run = './scripts/deploy.sh --full'
+
+[tasks."deploy:restart"]
+alias = "dr"
+description = "Deploy src and restart service (most common workflow)"
+run = './scripts/deploy.sh --restart'
+
+[tasks."deploy:full:restart"]
+alias = "dfr"
+description = "Deploy all files and restart service"
+run = './scripts/deploy.sh --full --restart'
+
+# ============================================================================
+# Audio/Hardware Debug Tasks (from Mac, runs on Pi)
+# ============================================================================
+
+[tasks."audio:levels"]
+alias = "al"
+description = "Show current audio mixer levels"
+run = '''
+#!/usr/bin/env bash
+echo "🎤 Microphone (Card 2):"
+ssh "$PI_USER@$PI_HOST" "amixer -c 2"
+echo ""
+echo "🔊 Speaker (Card 3):"
+ssh "$PI_USER@$PI_HOST" "amixer -c 3"
+'''
+
+[tasks."audio:mic-up"]
+description = "Set microphone to max volume"
+run = '''
+#!/usr/bin/env bash
+echo "🎤 Setting mic to max..."
+ssh "$PI_USER@$PI_HOST" "amixer -c 2 sset 'Mic Capture Volume' 16"
+'''
+
+[tasks."audio:speaker-up"]
+description = "Set speaker to high volume (95%)"
+run = '''
+#!/usr/bin/env bash
+echo "🔊 Setting speaker to 95%..."
+ssh "$PI_USER@$PI_HOST" "amixer -c 3 sset 'PCM' 140"
+'''
+
+[tasks."audio:test"]
+description = "Record 3 seconds and play back to test audio"
+run = '''
+#!/usr/bin/env bash
+echo "🎤 Recording 3 seconds... (speak now!)"
+ssh "$PI_USER@$PI_HOST" "arecord -D plughw:2,0 -d 3 -f S16_LE -r 16000 /tmp/test.wav 2>&1"
+echo "🔊 Playing back..."
+ssh "$PI_USER@$PI_HOST" "aplay -D plughw:3,0 /tmp/test.wav"
+echo "✅ Audio test complete"
+'''
+
+[tasks."audio:devices"]
+description = "List all audio devices on Pi"
+run = '''
+#!/usr/bin/env bash
+echo "📻 Audio Devices:"
+ssh "$PI_USER@$PI_HOST" "arecord -l && echo '---' && aplay -l"
+'''
+
+[tasks.say]
+description = "Inject a voice command remotely (e.g. mise say 'Hello')"
+run = 'ssh "$PI_USER@$PI_HOST" "echo \"$1\" > $PI_PROJECT_DIR/command.txt"'
+
+
+[tasks.cmd]
+alias = "say"
+description = "Alias for say"
+
+
+# ============================================================================
+# SSH/Utility Tasks (Mac only)
+# ============================================================================
+
+[tasks.ssh]
+description = "SSH into the Pi"
+run = 'ssh "$PI_USER@$PI_HOST"'
+
+[tasks.alsamixer]
+description = "Open alsamixer on Pi for manual adjustment"
+run = 'ssh -t "$PI_USER@$PI_HOST" alsamixer'
+
+# ============================================================================
+# Local Development Tasks (Mac only)
+# ============================================================================
+
+[tasks."local:run"]
+description = "Run locally (macOS mock mode)"
+run = '''
+#!/usr/bin/env bash
+source venv/bin/activate
+python src/core/main.py
+'''
+
+[tasks."local:test"]
+description = "Run tests locally"
+run = '''
+#!/usr/bin/env bash
+source venv/bin/activate
+python -m pytest tests/ -v
+'''
+
+# ============================================================================
+# Dependency Management (Mac only, runs on Pi)
+# ============================================================================
+
+[tasks."pi:deps"]
+alias = "pd"
+description = "Install/upgrade Python dependencies on Pi"
+run = '''
+#!/usr/bin/env bash
+echo "📦 Upgrading dependencies on Pi..."
+scp requirements.txt "$PI_USER@$PI_HOST:$PI_PROJECT_DIR/"
+ssh "$PI_USER@$PI_HOST" "cd ~/claude-astro-brain-rider && source venv/bin/activate && CC=gcc pip install -U -r requirements.txt"
+echo "✅ Dependencies updated!"
+'''
+
+[tasks."pi:setup"]
+description = "Full setup: create venv with Python 3.11 and install deps (run once)"
+run = '''
+#!/usr/bin/env bash
+set -e
+echo "🔧 Setting up Pi environment..."
+
+# Check if Python 3.11 is installed via mise
+if ! ssh "$PI_USER@$PI_HOST" "test -f ~/.local/share/mise/installs/python/3.11.14/bin/python3"; then
+  echo "❌ Python 3.11 not installed on Pi. Please run:"
+  echo "   1. Download locally: curl -L -o /tmp/cpython-3.11.tar.gz https://github.com/astral-sh/python-build-standalone/releases/download/20251217/cpython-3.11.14+20251217-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"
+  echo "   2. Copy to Pi: scp /tmp/cpython-3.11.tar.gz chall@cowboy-claude.local:/tmp/"
+  echo "   3. Extract: ssh chall@cowboy-claude.local 'mkdir -p ~/.local/share/mise/installs/python/3.11.14 && cd ~/.local/share/mise/installs/python/3.11.14 && tar xzf /tmp/cpython-3.11.tar.gz --strip-components=1'"
+  exit 1
+fi
+
+echo "📦 Creating venv with Python 3.11..."
+ssh "$PI_USER@$PI_HOST" "cd ~/claude-astro-brain-rider && rm -rf venv && ~/.local/share/mise/installs/python/3.11.14/bin/python3 -m venv venv"
+
+echo "📦 Installing dependencies..."
+scp requirements.txt "$PI_USER@$PI_HOST:$PI_PROJECT_DIR/"
+ssh "$PI_USER@$PI_HOST" "cd ~/claude-astro-brain-rider && source venv/bin/activate && pip install -U pip && CC=gcc pip install -r requirements.txt"
+
+echo "✅ Pi setup complete!"
+'''
+
+[tasks."pi:deps:check"]
+description = "Check installed package versions on Pi"
+run = '''
+#!/usr/bin/env bash
+echo "📦 Installed packages on Pi:"
+ssh "$PI_USER@$PI_HOST" "cd ~/claude-astro-brain-rider && source venv/bin/activate && pip list | grep -E 'openwakeword|faster-whisper|anthropic|scipy'"
+'''

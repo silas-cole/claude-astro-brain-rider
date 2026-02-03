@@ -1,0 +1,23 @@
+# Core dependencies
+anthropic
+numpy
+scipy
+python-dotenv
+pyyaml
+requests
+
+# Audio
+pyaudio
+pydub
+sounddevice
+
+# Speech processing
+faster-whisper
+
+# Raspberry Pi hardware (requires Pi with I2C/GPIO enabled)
+luma.oled>=3.13.0
+rpi-ws281x>=5.0.0
+RPi.GPIO>=0.7.1
+
+# Image processing for OLED displays
+Pillow

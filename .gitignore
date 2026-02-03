@@ -1,0 +1,24 @@
+# Environment and secrets
+.env
+.env.backup
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Training data (large files)
+training/
+*.onnx
+*.wav
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Temp files
+=*
+command.txt

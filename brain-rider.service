@@ -1,0 +1,40 @@
+[Unit]
+Description=Claude Astro Brain Rider - Voice Assistant
+After=network.target sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=cowboy
+Group=cowboy
+WorkingDirectory=/home/cowboy/claude-astro-brain-rider
+
+# Load environment variables from .env file
+EnvironmentFile=-/home/cowboy/claude-astro-brain-rider/.env
+Environment=PYTHONPATH=/home/cowboy/claude-astro-brain-rider/src
+Environment=PYTHONUNBUFFERED=1
+
+# Start the application
+ExecStart=/home/cowboy/claude-astro-brain-rider/venv/bin/python src/core/main.py
+
+# Restart policy
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=brain-rider
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+

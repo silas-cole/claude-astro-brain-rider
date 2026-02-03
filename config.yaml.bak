@@ -1,0 +1,33 @@
+
+system:
+  wake_word: "hey_cowboy"
+  wake_word_model_path: "models/hey_cowboy.onnx"  # Use custom wake word model
+  log_level: "DEBUG"
+
+audio:
+  input_device_index: null # Auto-detect
+  output_device_index: null # Auto-detect
+  sample_rate: 16000
+  chunk_size: 1024
+  alsa_output_device: "speaker"  # Custom ALSA device from ~/.asoundrc with auto sample rate conversion
+
+stt:
+  model_size: "tiny.en" # Use tiny.en for Pi 5 latency optimization initially
+  compute_type: "int8"
+
+tts:
+  english_voice: "en_US-lessac-medium"
+  mandarin_voice: "zh_CN-huayan-medium"
+  playback_speed: 1.0
+
+llm:
+  model: "claude-3-5-haiku-latest" # Low latency
+  max_tokens: 150
+
+hardware:
+  # OLED Config (I2C addresses)
+  oled_left_addr: 0x3C
+  oled_right_addr: 0x3D
+  # LED Config (WS2812B strip)
+  led_pin: 18
+  led_count: 8

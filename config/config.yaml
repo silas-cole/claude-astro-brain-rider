@@ -1,0 +1,39 @@
+
+system:
+  wake_word: "hey_jarvis"  # Say "Hey Jarvis" to activate
+  # wake_word_model_path: "models/hey_cowboy.onnx"  # Disabled - custom model undertrained
+  wake_word_threshold: 0.08  # Lower threshold for hey_jarvis testing
+  log_level: "DEBUG"
+
+audio:
+  input_device_index: 0  # USB PnP Sound Device (hw:2,0)
+  output_device_index: null # Auto-detect
+  sample_rate: 16000
+  chunk_size: 1024
+  alsa_output_device: "plughw:3,0"  # Direct hardware device (Card 3 = USB Speaker)
+
+stt:
+  model_size: "tiny.en" # Use tiny.en for Pi 5 latency optimization initially
+  compute_type: "int8"
+
+tts:
+  english_voice: "en_US-lessac-medium"
+  mandarin_voice: "zh_CN-huayan-medium"
+  playback_speed: 1.0
+
+llm:
+  model: "claude-3-haiku-20240307"  # Low latency Claude 3 Haiku
+  max_tokens: 150
+
+hardware:
+  # OLED Config (I2C addresses)
+  oled_left_addr: 0x3C
+  oled_right_addr: 0x3D
+  # LED Config (WS2812B strip)
+  led_pin: 18
+  led_count: 8
+
+remote:
+  api_endpoint: "https://api.cowboy.halleffect.click/commands/poll"
+  poll_interval: 2.0
+  enabled: true
