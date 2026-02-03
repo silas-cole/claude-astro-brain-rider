@@ -22,8 +22,16 @@ tts:
   playback_speed: 1.0
 
 llm:
-  model: "claude-3-haiku-20240307"  # Low latency Claude 3 Haiku
+  model: "claude-3-haiku-20240307"  # Low latency Claude 3 Haiku (fallback if Moltbot disabled)
   max_tokens: 150
+
+# Moltbot Integration - Routes voice commands through Moltbot/Silas
+moltbot:
+  enabled: true
+  url: "http://127.0.0.1:18789"
+  token: "c11c0a6f2d32e96045c7bd3bcc94cd9d43fdc477"
+  session_key: "voice:brain-rider"  # Consistent session for context
+  timeout_seconds: 30
 
 hardware:
   # OLED Config (I2C addresses)

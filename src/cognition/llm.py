@@ -1,7 +1,7 @@
-
 import logging
 import os
 import json
+import requests
 from anthropic import Anthropic
 from typing import Dict, Any, Optional
 
@@ -15,13 +15,28 @@ class LLMService:
         self.max_tokens = llm_config.get('max_tokens', 300)
         self.skill_registry = skill_registry
         
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            logger.warning("ANTHROPIC_API_KEY not found in environment variables. LLM will not work.")
-            self.client = None
+        # Moltbot integration settings
+        moltbot_config = config.get('moltbot', {})
+        self.moltbot_enabled = moltbot_config.get('enabled', False)
+        self.moltbot_url = moltbot_config.get('url', 'http://127.0.0.1:18789')
+        self.moltbot_token = moltbot_config.get('token', '')
+        self.moltbot_session = moltbot_config.get('session_key', 'voice:brain-rider')
+        self.moltbot_timeout = moltbot_config.get('timeout_seconds', 30)
+        
+        if self.moltbot_enabled:
+            logger.info(f"Moltbot integration ENABLED - URL: {self.moltbot_url}")
         else:
+            logger.info("Moltbot integration disabled, using direct Claude API")
+        
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key and not self.moltbot_enabled:
+            logger.warning("ANTHROPIC_API_KEY not found and Moltbot disabled. LLM will not work.")
+            self.client = None
+        elif api_key:
             self.client = Anthropic(api_key=api_key)
             logger.info(f"Claude Client initialized with model: {self.model}")
+        else:
+            self.client = None
 
         self._base_system_prompt = """You are Claude, the "Brain Rider" riding on Amazon Astro robot - your trusty robotic steed.
 
@@ -141,9 +156,12 @@ Examples:
 
     def process(self, user_text: str) -> list[Dict[str, Any]]:
         """
-        Sends text to Claude and returns list of structured responses.
+        Sends text to Claude (directly or via Moltbot) and returns list of structured responses.
         Handles one level of tool use (User -> LLM -> Tool -> LLM -> Response).
         """
+        if self.moltbot_enabled:
+            return self._process_via_moltbot(user_text)
+        
         responses = self._query_llm(user_text)
         
         # Check for tool use in the FIRST response (simplification: only support tool use if it's the only/first thing)
@@ -189,6 +207,117 @@ Examples:
                 final_responses.append(response)
             
         return final_responses
+
+    def _process_via_moltbot(self, user_text: str) -> list[Dict[str, Any]]:
+        """
+        Send voice command to Moltbot and get response.
+        Moltbot (Silas) will process with full context, memory, and tools.
+        """
+        # Build the prompt for Moltbot with cowboy/Astro context
+        prompt = f"""[Voice Command via Brain Rider]
+
+The user spoke this command to the cowboy voice assistant on the Raspberry Pi / Astro robot:
+"{user_text}"
+
+Respond as the cowboy character. If they want to control Astro, include the command.
+
+IMPORTANT: Return your response in this JSON format:
+{{"type":"command"|"conversation", "english_response":"your cowboy reply", "astro_command":"Astro, do something"|null, "sound_effect":"yeehaw"|null, "emotion":"excited"|"neutral"}}
+
+Keep it short (1-2 sentences). Be sarcastic and country. Drop puns.
+Available Astro commands: go to [location], come here, dance, follow me, stop, act like a [animal]
+Available locations: front yard, studio, lounge, shotgun position
+"""
+
+        payload = {
+            "message": prompt,
+            "name": "Voice",
+            "sessionKey": self.moltbot_session,
+            "deliver": False,  # Don't send to Telegram, we handle TTS locally
+            "timeoutSeconds": self.moltbot_timeout
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.moltbot_token}",
+            "Content-Type": "application/json"
+        }
+
+        try:
+            logger.info(f"Sending to Moltbot: {user_text[:50]}...")
+            
+            response = requests.post(
+                f"{self.moltbot_url}/hooks/agent",
+                json=payload,
+                headers=headers,
+                timeout=self.moltbot_timeout + 5
+            )
+
+            logger.info(f"Moltbot response status: {response.status_code}")
+
+            if response.status_code == 202:
+                # Async run accepted - the hook runs asynchronously
+                # For now, return acknowledgment. TODO: poll for result
+                result = response.json()
+                logger.info(f"Moltbot async response: {result}")
+                
+                # The 202 response might include a runId we could poll
+                # For MVP, just acknowledge and let it process
+                return self._format_simple_response(
+                    "Got it, partner. Give me a second to think on that.",
+                    emotion="thinking"
+                )
+
+            elif response.status_code == 200:
+                # Synchronous response (unlikely with /hooks/agent but handle it)
+                result = response.json()
+                response_text = result.get("response", result.get("text", ""))
+                return self._parse_moltbot_response(response_text)
+
+            else:
+                logger.error(f"Moltbot error {response.status_code}: {response.text}")
+                return self._format_simple_response(
+                    "Having trouble reaching my brain, partner. Try again?",
+                    emotion="confused"
+                )
+
+        except requests.exceptions.Timeout:
+            logger.error("Moltbot request timed out")
+            return self._format_simple_response(
+                "That's taking too long, partner. Let me try again.",
+                emotion="confused"
+            )
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Cannot connect to Moltbot: {e}")
+            return self._format_simple_response(
+                "Can't reach my brain right now. Is Moltbot running?",
+                emotion="confused"
+            )
+        except Exception as e:
+            logger.error(f"Moltbot request failed: {e}")
+            return self._format_simple_response(
+                "Something went wrong in the connection, partner.",
+                emotion="confused"
+            )
+
+    def _parse_moltbot_response(self, response_text: str) -> list[Dict[str, Any]]:
+        """Parse response from Moltbot, which should be JSON formatted."""
+        try:
+            # Try to extract JSON from the response
+            return self._parse_llm_response(response_text)
+        except Exception as e:
+            logger.warning(f"Could not parse Moltbot response as JSON: {e}")
+            # If not JSON, treat as plain text response
+            return self._format_simple_response(response_text)
+
+    def _format_simple_response(self, text: str, emotion: str = "neutral") -> list[Dict[str, Any]]:
+        """Format a simple text response into the expected structure."""
+        return [{
+            "type": "conversation",
+            "english_response": text,
+            "astro_command": None,
+            "sound_effect": None,
+            "emotion": emotion
+        }]
 
     def _query_llm(self, input_text: str) -> list[Dict[str, Any]]:
         if not self.client:
