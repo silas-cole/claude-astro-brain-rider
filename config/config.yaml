@@ -29,9 +29,12 @@ llm:
 moltbot:
   enabled: true
   url: "http://127.0.0.1:18789"
-  token: "c11c0a6f2d32e96045c7bd3bcc94cd9d43fdc477"
+  token: "c11c0a6f2d32e96045c7bd3bcc94cd9d43fdc477"  # webhook token
+  gateway_token: "c42ae46b477562502c92e49fcba75d021bcb3903f45f5268"  # gateway auth for polling
   session_key: "voice:brain-rider"  # Consistent session for context
   timeout_seconds: 30
+  poll_interval: 0.5  # seconds between polls
+  max_polls: 60  # ~30 seconds max wait
 
 hardware:
   # OLED Config (I2C addresses)

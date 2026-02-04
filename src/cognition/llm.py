@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import time
 import requests
 from anthropic import Anthropic
 from typing import Dict, Any, Optional
@@ -19,9 +20,12 @@ class LLMService:
         moltbot_config = config.get('moltbot', {})
         self.moltbot_enabled = moltbot_config.get('enabled', False)
         self.moltbot_url = moltbot_config.get('url', 'http://127.0.0.1:18789')
-        self.moltbot_token = moltbot_config.get('token', '')
+        self.moltbot_token = moltbot_config.get('token', '')  # hooks token
+        self.moltbot_gateway_token = moltbot_config.get('gateway_token', '')  # gateway auth token for polling
         self.moltbot_session = moltbot_config.get('session_key', 'voice:brain-rider')
         self.moltbot_timeout = moltbot_config.get('timeout_seconds', 30)
+        self.moltbot_poll_interval = moltbot_config.get('poll_interval', 0.5)  # seconds between polls
+        self.moltbot_max_polls = moltbot_config.get('max_polls', 60)  # max poll attempts (30 seconds at 0.5s interval)
         
         if self.moltbot_enabled:
             logger.info(f"Moltbot integration ENABLED - URL: {self.moltbot_url}")
@@ -255,17 +259,20 @@ Available locations: front yard, studio, lounge, shotgun position
             logger.info(f"Moltbot response status: {response.status_code}")
 
             if response.status_code == 202:
-                # Async run accepted - the hook runs asynchronously
-                # For now, return acknowledgment. TODO: poll for result
+                # Async run accepted - poll for the result
                 result = response.json()
-                logger.info(f"Moltbot async response: {result}")
+                run_id = result.get('runId')
+                logger.info(f"Moltbot async run started: {run_id}")
                 
-                # The 202 response might include a runId we could poll
-                # For MVP, just acknowledge and let it process
-                return self._format_simple_response(
-                    "Got it, partner. Give me a second to think on that.",
-                    emotion="thinking"
-                )
+                # Poll for the response
+                response_text = self._poll_for_response()
+                if response_text:
+                    return self._parse_moltbot_response(response_text)
+                else:
+                    return self._format_simple_response(
+                        "Took too long to think on that one, partner.",
+                        emotion="confused"
+                    )
 
             elif response.status_code == 200:
                 # Synchronous response (unlikely with /hooks/agent but handle it)
@@ -298,6 +305,107 @@ Available locations: front yard, studio, lounge, shotgun position
                 "Something went wrong in the connection, partner.",
                 emotion="confused"
             )
+
+    def _poll_for_response(self) -> Optional[str]:
+        """
+        Poll Moltbot for the assistant's response to our voice command.
+        Uses the sessions_history tool via the tools/invoke API.
+        """
+        if not self.moltbot_gateway_token:
+            logger.warning("No gateway token configured for polling")
+            return None
+            
+        headers = {
+            "Authorization": f"Bearer {self.moltbot_gateway_token}",
+            "Content-Type": "application/json"
+        }
+        
+        # Get the initial message count to detect new messages
+        initial_count = self._get_session_message_count(headers)
+        logger.info(f"Initial session message count: {initial_count}")
+        
+        for i in range(self.moltbot_max_polls):
+            time.sleep(self.moltbot_poll_interval)
+            
+            try:
+                # Check for new assistant message
+                payload = {
+                    "tool": "sessions_history",
+                    "args": {
+                        "sessionKey": f"agent:main:{self.moltbot_session}",
+                        "limit": 3,
+                        "includeTools": False
+                    }
+                }
+                
+                response = requests.post(
+                    f"{self.moltbot_url}/tools/invoke",
+                    json=payload,
+                    headers=headers,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("ok"):
+                        # Parse the history response
+                        content = result.get("result", {}).get("content", [])
+                        if content and len(content) > 0:
+                            text_content = content[0].get("text", "")
+                            try:
+                                history = json.loads(text_content)
+                                messages = history.get("messages", [])
+                                
+                                # Look for the latest assistant message
+                                for msg in reversed(messages):
+                                    if msg.get("role") == "assistant":
+                                        # Extract the text content
+                                        msg_content = msg.get("content", [])
+                                        for item in msg_content:
+                                            if item.get("type") == "text":
+                                                text = item.get("text", "")
+                                                logger.info(f"Got response from Moltbot: {text[:100]}...")
+                                                return text
+                            except json.JSONDecodeError:
+                                pass
+                
+                logger.debug(f"Poll {i+1}/{self.moltbot_max_polls}: waiting for response...")
+                
+            except Exception as e:
+                logger.warning(f"Poll error: {e}")
+                continue
+        
+        logger.warning("Polling timed out waiting for Moltbot response")
+        return None
+    
+    def _get_session_message_count(self, headers: dict) -> int:
+        """Get the current message count for our session."""
+        try:
+            payload = {
+                "tool": "sessions_history",
+                "args": {
+                    "sessionKey": f"agent:main:{self.moltbot_session}",
+                    "limit": 1,
+                    "includeTools": False
+                }
+            }
+            response = requests.post(
+                f"{self.moltbot_url}/tools/invoke",
+                json=payload,
+                headers=headers,
+                timeout=5
+            )
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("ok"):
+                    content = result.get("result", {}).get("content", [])
+                    if content:
+                        text = content[0].get("text", "{}")
+                        history = json.loads(text)
+                        return len(history.get("messages", []))
+        except Exception as e:
+            logger.warning(f"Could not get session message count: {e}")
+        return 0
 
     def _parse_moltbot_response(self, response_text: str) -> list[Dict[str, Any]]:
         """Parse response from Moltbot, which should be JSON formatted."""
